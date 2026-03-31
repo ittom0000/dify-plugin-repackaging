@@ -60,17 +60,29 @@ jobs:
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
             -e PIP_MIRROR_URL=https://pypi.org/simple \
+            -e PIP_PLATFORM=${{ env.PIP_PLATFORM }} \
+            -e PACKAGE_SUFFIX=${{ env.PACKAGE_SUFFIX }} \
             python:3.12-slim \
             bash -c "
-              apt-get update && apt-get install -y unzip zip && \
+              set -e && \
+              echo 'Installing required packages...' && \
+              apt-get update && \
+              apt-get install -y --no-install-recommends \
+                unzip \
+                zip \
+                curl \
+                ca-certificates && \
+              rm -rf /var/lib/apt/lists/* && \
+              echo 'Making script executable...' && \
               chmod +x ./plugin_repackaging.sh && \
+              echo 'Running plugin repackaging...' && \
               ./plugin_repackaging.sh \
-              -p ${{ env.PIP_PLATFORM }} \
-              -s ${{ env.PACKAGE_SUFFIX }} \
-              market \
-              '${{ github.event.inputs.plugin_author }}' \
-              '${{ github.event.inputs.plugin_name }}' \
-              '${{ github.event.inputs.plugin_version }}'
+                -p \${PIP_PLATFORM} \
+                -s \${PACKAGE_SUFFIX} \
+                market \
+                '${{ github.event.inputs.plugin_author }}' \
+                '${{ github.event.inputs.plugin_name }}' \
+                '${{ github.event.inputs.plugin_version }}'
             "
       
       - name: Run plugin repackaging natively (x86_64)
@@ -101,8 +113,18 @@ jobs:
         run: |
           if [ "${{ inputs.platform_arm }}" = "true" ]; then
             echo "Verifying ARM64 artifact..."
-            # 如果有二进制文件，可以检查架构
-            unzip -l "$ARTIFACT_PATH" | grep -E "\.(so|dylib|node)" || echo "No binary files to verify"
+            echo "Artifact: $ARTIFACT_PATH"
+            echo "Package contents:"
+            unzip -l "$ARTIFACT_PATH" | head -30
+            # 检查是否有二进制文件
+            BIN_FILES=$(unzip -l "$ARTIFACT_PATH" | grep -E "\.(so|dylib|node)$" || true)
+            if [ -n "$BIN_FILES" ]; then
+              echo "Binary files found in package:"
+              echo "$BIN_FILES"
+              echo "Note: These files should be ARM64 architecture"
+            else
+              echo "No binary files found (pure Python plugin)"
+            fi
           fi
       
       - name: Upload artifact
@@ -110,3 +132,4 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.ARTIFACT_PATH }}
+          if-no-files-found: error
